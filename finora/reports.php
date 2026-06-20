@@ -233,6 +233,7 @@ $topExpenses = $stmt->get_result();
             <li class="menu-item"><a href="accounts.php" class="menu-link"><i class="menu-icon fas fa-wallet"></i><span>Tài khoản</span></a></li>
             <li class="menu-item"><a href="transactions.php" class="menu-link"><i class="menu-icon fas fa-exchange-alt"></i><span>Giao dịch</span></a></li>
             <li class="menu-item"><a href="budgets.php" class="menu-link"><i class="menu-icon fas fa-chart-pie"></i><span>Ngân sách</span></a></li>
+            <li class="menu-item"><a href="budget-allocation.php" class="menu-link"><i class="menu-icon fas fa-percentage"></i><span>Phân bổ Thu nhập</span></a></li>
             <li class="menu-item"><a href="reports.php" class="menu-link active"><i class="menu-icon fas fa-file-alt"></i><span>Báo cáo</span></a></li>
             <li class="menu-item"><a href="cards.php" class="menu-link"><i class="menu-icon fas fa-credit-card"></i><span>Thẻ</span></a></li>
             <li class="menu-item"><a href="settings.php" class="menu-link"><i class="menu-icon fas fa-cog"></i><span>Cài đặt</span></a></li>

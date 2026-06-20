@@ -261,6 +261,18 @@ $netWorth = $totalAssets - $totalDebt;
             box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
         }
 
+        .btn-ghost {
+            background: var(--card);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-ghost:hover {
+            background: var(--bg);
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
         /* Overview Cards */
         .overview-cards {
             display: grid;
@@ -664,6 +676,12 @@ $netWorth = $totalAssets - $totalDebt;
                 </a>
             </li>
             <li class="menu-item">
+                <a href="budget-allocation.php" class="menu-link">
+                    <i class="menu-icon fas fa-percentage"></i>
+                    <span>Phân bổ Thu nhập</span>
+                </a>
+            </li>
+            <li class="menu-item">
                 <a href="reports.php" class="menu-link">
                     <i class="menu-icon fas fa-file-alt"></i>
                     <span>Báo cáo</span>
@@ -710,10 +728,16 @@ $netWorth = $totalAssets - $totalDebt;
                 <h1 class="page-title">💳 Tài khoản & Ví tiền</h1>
                 <p class="page-subtitle">Quản lý tất cả tài khoản ngân hàng, ví điện tử và tiền mặt</p>
             </div>
-            <button class="btn btn-primary" onclick="openAddModal()">
-                <i class="fas fa-plus"></i>
-                Thêm tài khoản
-            </button>
+            <div style="display: flex; gap: 12px;">
+                <a href="transfer.php" class="btn btn-ghost" style="text-decoration: none;">
+                    <i class="fas fa-exchange-alt"></i>
+                    Chuyển tiền
+                </a>
+                <button class="btn btn-primary" onclick="openAddModal()">
+                    <i class="fas fa-plus"></i>
+                    Thêm tài khoản
+                </button>
+            </div>
         </div>
 
         <!-- Overview Cards -->

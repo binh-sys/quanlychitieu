@@ -651,6 +651,12 @@ $userName = $user['full_name'];
                 </a>
             </li>
             <li class="menu-item">
+                <a href="budget-allocation.php" class="menu-link">
+                    <i class="menu-icon fas fa-percentage"></i>
+                    <span>Phân bổ Thu nhập</span>
+                </a>
+            </li>
+            <li class="menu-item">
                 <a href="reports.php" class="menu-link">
                     <i class="menu-icon fas fa-file-alt"></i>
                     <span>Báo cáo</span>

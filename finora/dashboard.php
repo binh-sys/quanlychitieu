@@ -11,11 +11,74 @@ if (!isset($_SESSION['user_id'])) {
 $userId = $_SESSION['user_id'];
 $userName = $_SESSION['user_name'];
 
+// Xử lý nạp tiền
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'deposit') {
+    $toWalletId = intval($_POST['to_wallet_id']);
+    $amount = floatval($_POST['amount']);
+    $description = trim($_POST['description']);
+    $transactionDate = $_POST['transaction_date'];
+    
+    if ($toWalletId > 0 && $amount > 0) {
+        $conn->begin_transaction();
+        try {
+            // Cộng tiền vào tài khoản
+            $conn->query("UPDATE wallets SET balance = balance + $amount WHERE id = $toWalletId AND user_id = $userId");
+            // Tạo giao dịch thu nhập
+            $stmt = $conn->prepare("INSERT INTO transactions (user_id, wallet_id, category_id, type, amount, description, transaction_date) VALUES (?, ?, 17, 'income', ?, ?, ?)");
+            $stmt->bind_param("iidss", $userId, $toWalletId, $amount, $description, $transactionDate);
+            $stmt->execute();
+            $conn->commit();
+            header('Location: dashboard.php?money=deposit_success');
+            exit;
+        } catch (Exception $e) {
+            $conn->rollback();
+        }
+    }
+}
+
+// Xử lý rút tiền (chuyển tiền)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'transfer') {
+    $fromWalletId = intval($_POST['from_wallet_id']);
+    $toWalletId = intval($_POST['to_wallet_id_withdraw']);
+    $amount = floatval($_POST['amount']);
+    $description = trim($_POST['description']);
+    $transferDate = $_POST['transaction_date'];
+    
+    if ($fromWalletId !== $toWalletId && $amount > 0) {
+        // Kiểm tra số dư
+        $checkBalance = $conn->query("SELECT balance FROM wallets WHERE id = $fromWalletId AND user_id = $userId");
+        $fromWallet = $checkBalance->fetch_assoc();
+        
+        if ($fromWallet && $fromWallet['balance'] >= $amount) {
+            $conn->begin_transaction();
+            try {
+                // Trừ tiền từ tài khoản nguồn
+                $conn->query("UPDATE wallets SET balance = balance - $amount WHERE id = $fromWalletId");
+                // Cộng tiền vào tài khoản đích
+                $conn->query("UPDATE wallets SET balance = balance + $amount WHERE id = $toWalletId");
+                // Tạo giao dịch chuyển tiền
+                $stmt = $conn->prepare("INSERT INTO transactions (user_id, wallet_id, category_id, type, amount, description, transaction_date) VALUES (?, ?, 2, 'expense', ?, ?, ?)");
+                $stmt->bind_param("iidss", $userId, $fromWalletId, $amount, $description, $transferDate);
+                $stmt->execute();
+                $stmt = $conn->prepare("INSERT INTO transactions (user_id, wallet_id, category_id, type, amount, description, transaction_date) VALUES (?, ?, 17, 'income', ?, ?, ?)");
+                $stmt->bind_param("iidss", $userId, $toWalletId, $amount, $description, $transferDate);
+                $stmt->execute();
+                $conn->commit();
+                header('Location: dashboard.php?money=withdraw_success');
+                exit;
+            } catch (Exception $e) {
+                $conn->rollback();
+            }
+        }
+    }
+}
+
 // Lấy thông tin tổng quan
 $stmt = $conn->prepare("
     SELECT 
-        COALESCE(SUM(CASE WHEN w.type != 'credit_card' THEN w.balance ELSE 0 END), 0) as total_balance,
-        COALESCE(SUM(CASE WHEN w.type = 'credit_card' AND w.balance < 0 THEN ABS(w.balance) ELSE 0 END), 0) as total_debt
+        COALESCE(SUM(w.balance), 0) as total_balance,
+        COALESCE(SUM(CASE WHEN w.balance < 0 THEN ABS(w.balance) ELSE 0 END), 0) as total_debt,
+        COALESCE(SUM(CASE WHEN w.balance > 0 THEN w.balance ELSE 0 END), 0) as total_assets
     FROM wallets w
     WHERE w.user_id = ? AND w.is_active = 1
 ");
@@ -738,6 +801,12 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                 </a>
             </li>
             <li class="menu-item">
+                <a href="budget-allocation.php" class="menu-link">
+                    <i class="menu-icon fas fa-percentage"></i>
+                    <span>Phân bổ Thu nhập</span>
+                </a>
+            </li>
+            <li class="menu-item">
                 <a href="reports.php" class="menu-link">
                     <i class="menu-icon fas fa-file-alt"></i>
                     <span>Báo cáo</span>
@@ -796,6 +865,18 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             </div>
         </div>
 
+        <?php if (isset($_GET['money'])): ?>
+            <?php if ($_GET['money'] === 'deposit_success'): ?>
+                <div style="padding: 16px 20px; background: #D1FAE5; color: #065F46; border-radius: 12px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; border: 1px solid #6EE7B7;">
+                    <i class="fas fa-check-circle"></i> Nạp tiền thành công!
+                </div>
+            <?php elseif ($_GET['money'] === 'withdraw_success'): ?>
+                <div style="padding: 16px 20px; background: #D1FAE5; color: #065F46; border-radius: 12px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; border: 1px solid #6EE7B7;">
+                    <i class="fas fa-check-circle"></i> Rút tiền thành công!
+                </div>
+            <?php endif; ?>
+        <?php endif; ?>
+
         <!-- Balance Card với Gradient -->
         <div class="balance-card">
             <div class="balance-card-content">
@@ -804,7 +885,7 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                 
                 <div class="balance-stats">
                     <div class="balance-stat">
-                        <div class="balance-stat-label">� Thu nhập tháng này</div>
+                        <div class="balance-stat-label">📈 Thu nhập tháng này</div>
                         <div class="balance-stat-value">+<?= number_format($income['monthly_income'], 0, ',', '.') ?>đ</div>
                     </div>
                     <div class="balance-stat">
@@ -821,29 +902,29 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
         <!-- Quick Actions -->
         <div class="quick-actions">
-            <a href="#" class="action-btn" onclick="event.preventDefault(); openQuickAddModal(); document.querySelector('[data-type=income]').click();">
+            <a href="#" class="action-btn" onclick="event.preventDefault(); openMoneyModal('deposit');">
                 <div class="action-icon">
-                    <i class="fas fa-plus-circle"></i>
+                    <i class="fas fa-coins"></i>
                 </div>
-                <div class="action-label">Nạp tiền</div>
-            </a>
-            <a href="transactions.php?action=transfer" class="action-btn">
-                <div class="action-icon">
-                    <i class="fas fa-exchange-alt"></i>
-                </div>
-                <div class="action-label">Chuyển tiền</div>
+                <div class="action-label">Nạp/Rút tiền</div>
             </a>
             <a href="#" class="action-btn" onclick="event.preventDefault(); openQuickAddModal();">
                 <div class="action-icon">
-                    <i class="fas fa-credit-card"></i>
+                    <i class="fas fa-receipt"></i>
                 </div>
-                <div class="action-label">Thanh toán</div>
+                <div class="action-label">Chi tiêu</div>
+            </a>
+            <a href="budget-allocation.php" class="action-btn">
+                <div class="action-icon">
+                    <i class="fas fa-percentage"></i>
+                </div>
+                <div class="action-label">Phân bổ</div>
             </a>
             <a href="reports.php" class="action-btn">
                 <div class="action-icon">
-                    <i class="fas fa-ellipsis-h"></i>
+                    <i class="fas fa-chart-bar"></i>
                 </div>
-                <div class="action-label">Tiện ích</div>
+                <div class="action-label">Báo cáo</div>
             </a>
         </div>
 
@@ -998,7 +1079,7 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     </main>
 
     <!-- Floating Action Button -->
-    <button class="fab" onclick="openQuickAddModal()">
+    <button class="fab" onclick="openQuickAddModal()" title="Thêm chi tiêu">
         <i class="fas fa-plus"></i>
     </button>
 
@@ -1006,38 +1087,37 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     <div class="modal" id="quickAddModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 class="modal-title">⚡ Thêm giao dịch nhanh</h3>
+                <h3 class="modal-title">💳 Các khoản chi tiêu</h3>
                 <button class="modal-close" onclick="closeQuickAddModal()">×</button>
             </div>
 
             <form method="POST" action="transactions.php" class="quick-form">
-                <div class="form-tabs">
-                    <button type="button" class="form-tab active" data-type="income">
-                        <i class="fas fa-minus-circle"></i> Nhập số tiền
-                    </button>
-                    <button type="button" class="form-tab" data-type="income">
-                        <i class="fas fa-plus-circle"></i> Nguồn tiên khác
-                    </button>
-                </div>
-
                 <input type="hidden" name="action" value="add">
-                <input type="hidden" name="type" id="transactionType" value="expense">
+                <input type="hidden" name="type" value="expense">
 
                 <div class="form-group">
-                    <label class="form-label">Số tiền</label>
+                    <label class="form-label">Số tiền (VNĐ) *</label>
                     <input type="number" name="amount" class="form-input form-input-lg" 
-                           placeholder="0" min="0" step="1" required autofocus>
+                           placeholder="0" min="1" step="1" required autofocus>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Danh mục</label>
+                    <label class="form-label">Danh mục chi tiêu *</label>
                     <select name="category_id" class="form-select" required id="categorySelect">
                         <option value="">-- Chọn danh mục --</option>
+                        <?php 
+                        $expenseCatsForModal = $conn->query("SELECT id, name, icon FROM categories WHERE (user_id = $userId OR is_system = 1) AND type = 'expense' ORDER BY name");
+                        while ($cat = $expenseCatsForModal->fetch_assoc()): 
+                        ?>
+                            <option value="<?= $cat['id'] ?>">
+                                <?= htmlspecialchars($cat['icon']) ?> <?= htmlspecialchars($cat['name']) ?>
+                            </option>
+                        <?php endwhile; ?>
                     </select>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Tài khoản</label>
+                    <label class="form-label">Tài khoản thanh toán *</label>
                     <select name="wallet_id" class="form-select" required>
                         <option value="">-- Chọn tài khoản --</option>
                         <?php 
@@ -1058,7 +1138,111 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
                 <div class="form-group">
                     <label class="form-label">Mô tả</label>
-                    <input type="text" name="description" class="form-input" placeholder="VD: Mua sắm, Ăn trưa...">
+                    <input type="text" name="description" class="form-input" placeholder="VD: Mua cà phê, Ăn trưa...">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Ngày giao dịch *</label>
+                    <input type="date" name="transaction_date" class="form-input" value="<?= date('Y-m-d') ?>" required>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-ghost" onclick="closeQuickAddModal()">Hủy</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-check"></i> Thêm chi tiêu
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Chuyển tiền -->
+    <div class="modal" id="transferModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title"> Nạp/Rút tiền</h3>
+                <button class="modal-close" onclick="closeTransferModal()">×</button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="form-tabs">
+                <button type="button" class="form-tab active" data-money-type="deposit" onclick="switchMoneyTab('deposit')">
+                    <i class="fas fa-arrow-down"></i> Nạp tiền
+                </button>
+                <button type="button" class="form-tab" data-money-type="withdraw" onclick="switchMoneyTab('withdraw')">
+                    <i class="fas fa-arrow-up"></i> Rút tiền
+                </button>
+            </div>
+
+            <form method="POST" action="" class="quick-form" id="moneyForm">
+                <input type="hidden" name="action" value="transfer" id="moneyAction">
+
+                <!-- Nạp tiền: Chọn tài khoản đích -->
+                <div class="form-group" id="depositSection">
+                    <label class="form-label">Nạp vào tài khoản *</label>
+                    <select name="to_wallet_id" class="form-select" id="depositWallet">
+                        <option value="">-- Chọn tài khoản --</option>
+                        <?php 
+                        $walletsForDeposit = $conn->query("SELECT id, name, icon, balance FROM wallets WHERE user_id = $userId AND is_active = 1 ORDER BY name");
+                        while ($wallet = $walletsForDeposit->fetch_assoc()): 
+                        ?>
+                            <option value="<?= $wallet['id'] ?>">
+                                <?= htmlspecialchars($wallet['icon']) ?> <?= htmlspecialchars($wallet['name']) ?> 
+                                (<?= number_format($wallet['balance'], 0, ',', '.') ?>đ)
+                            </option>
+                        <?php endwhile; ?>
+                    </select>
+                </div>
+
+                <!-- Rút tiền: Chọn 2 tài khoản -->
+                <div id="withdrawSection" style="display: none;">
+                    <div class="form-group">
+                        <label class="form-label">Rút từ tài khoản *</label>
+                        <select name="from_wallet_id" class="form-select" id="fromWallet">
+                            <option value="">-- Chọn tài khoản nguồn --</option>
+                            <?php 
+                            $walletsForWithdraw1 = $conn->query("SELECT id, name, icon, balance FROM wallets WHERE user_id = $userId AND is_active = 1 ORDER BY name");
+                            while ($wallet = $walletsForWithdraw1->fetch_assoc()): 
+                            ?>
+                                <option value="<?= $wallet['id'] ?>" data-balance="<?= $wallet['balance'] ?>">
+                                    <?= htmlspecialchars($wallet['icon']) ?> <?= htmlspecialchars($wallet['name']) ?> 
+                                    (<?= number_format($wallet['balance'], 0, ',', '.') ?>đ)
+                                </option>
+                            <?php endwhile; ?>
+                        </select>
+                    </div>
+
+                    <div style="text-align: center; margin: 8px 0; color: var(--primary); font-size: 20px;">
+                        <i class="fas fa-arrow-down"></i>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Chuyển đến tài khoản *</label>
+                        <select name="to_wallet_id_withdraw" class="form-select" id="toWallet">
+                            <option value="">-- Chọn tài khoản đích --</option>
+                            <?php 
+                            $walletsForWithdraw2 = $conn->query("SELECT id, name, icon, balance FROM wallets WHERE user_id = $userId AND is_active = 1 ORDER BY name");
+                            while ($wallet = $walletsForWithdraw2->fetch_assoc()): 
+                            ?>
+                                <option value="<?= $wallet['id'] ?>">
+                                    <?= htmlspecialchars($wallet['icon']) ?> <?= htmlspecialchars($wallet['name']) ?> 
+                                    (<?= number_format($wallet['balance'], 0, ',', '.') ?>đ)
+                                </option>
+                            <?php endwhile; ?>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Số tiền *</label>
+                    <input type="number" name="amount" class="form-input form-input-lg" 
+                           placeholder="0" min="1" step="1" required id="moneyAmount">
+                    <div style="font-size: 11px; color: var(--text-lighter); margin-top: 4px;" id="moneyWarning"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Mô tả</label>
+                    <input type="text" name="description" class="form-input" placeholder="VD: Nạp tiền mặt" id="moneyDescription">
                 </div>
 
                 <div class="form-group">
@@ -1067,9 +1251,9 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                 </div>
 
                 <div class="form-actions">
-                    <button type="button" class="btn btn-ghost" onclick="closeQuickAddModal()">Hủy</button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-check"></i> Thêm giao dịch
+                    <button type="button" class="btn btn-ghost" onclick="closeTransferModal()">Hủy</button>
+                    <button type="submit" class="btn btn-primary" id="moneySubmitBtn">
+                        <i class="fas fa-check"></i> <span id="moneySubmitText">Nạp tiền</span>
                     </button>
                 </div>
             </form>
@@ -1107,9 +1291,36 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             padding: 32px;
             max-width: 500px;
             width: 90%;
-            max-height: 90vh;
+            max-height: 95vh;
             overflow-y: auto;
             animation: slideUp 0.3s;
+        }
+
+        #transferModal .modal-content {
+            max-height: 90vh;
+            padding: 24px;
+        }
+
+        #transferModal .form-group {
+            margin-bottom: 14px;
+        }
+
+        #transferModal .modal-header {
+            margin-bottom: 20px;
+        }
+
+        #transferModal .form-tabs {
+            margin-bottom: 20px;
+        }
+
+        #transferModal .form-label {
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+
+        #transferModal .form-input,
+        #transferModal .form-select {
+            padding: 10px 14px;
         }
 
         @keyframes slideUp {
@@ -1208,7 +1419,12 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         .form-input-lg {
             font-size: 24px;
             font-weight: 700;
-            padding: 16px 20px;
+            padding: 12px 16px;
+        }
+
+        #transferModal .form-input-lg {
+            font-size: 22px;
+            padding: 10px 14px;
         }
 
         .form-input:focus, .form-select:focus {
@@ -1246,45 +1462,109 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         const expenseCategories = <?= json_encode($expenseCategoriesData) ?>;
         const incomeCategories = <?= json_encode($incomeCategoriesData) ?>;
 
-        // Quick Add Modal
+        // Quick Add Modal - Chỉ cho chi tiêu
         function openQuickAddModal() {
             document.getElementById('quickAddModal').classList.add('show');
-            updateCategories('expense');
         }
 
         function closeQuickAddModal() {
             document.getElementById('quickAddModal').classList.remove('show');
         }
 
-        // Transaction Type Tabs
-        document.querySelectorAll('.form-tab').forEach(tab => {
-            tab.addEventListener('click', function() {
-                const type = this.dataset.type;
-                
-                // Update active tab
-                document.querySelectorAll('.form-tab').forEach(t => t.classList.remove('active'));
-                this.classList.add('active');
-                
-                // Update hidden input
-                document.getElementById('transactionType').value = type;
-                
-                // Update categories
-                updateCategories(type);
-            });
-        });
-
-        function updateCategories(type) {
-            const select = document.getElementById('categorySelect');
-            const categories = type === 'expense' ? expenseCategories : incomeCategories;
-            
-            select.innerHTML = '<option value="">-- Chọn danh mục --</option>';
-            categories.forEach(cat => {
-                const option = document.createElement('option');
-                option.value = cat.id;
-                option.textContent = cat.icon + ' ' + cat.name;
-                select.appendChild(option);
-            });
+        // Transfer Modal
+        function openTransferModal() {
+            document.getElementById('transferModal').classList.add('show');
+            switchMoneyTab('deposit'); // Mặc định mở tab Nạp tiền
         }
+
+        function openMoneyModal(type = 'deposit') {
+            document.getElementById('transferModal').classList.add('show');
+            switchMoneyTab(type);
+        }
+
+        function closeTransferModal() {
+            document.getElementById('transferModal').classList.remove('show');
+        }
+
+        function switchMoneyTab(type) {
+            const depositSection = document.getElementById('depositSection');
+            const withdrawSection = document.getElementById('withdrawSection');
+            const depositWallet = document.getElementById('depositWallet');
+            const fromWallet = document.getElementById('fromWallet');
+            const toWalletWithdraw = document.querySelector('[name="to_wallet_id_withdraw"]');
+            const moneyDescription = document.getElementById('moneyDescription');
+            const moneySubmitText = document.getElementById('moneySubmitText');
+            const moneyAction = document.getElementById('moneyAction');
+            
+            // Update active tab
+            document.querySelectorAll('[data-money-type]').forEach(t => t.classList.remove('active'));
+            document.querySelector(`[data-money-type="${type}"]`).classList.add('active');
+            
+            if (type === 'deposit') {
+                // Nạp tiền
+                depositSection.style.display = 'block';
+                withdrawSection.style.display = 'none';
+                depositWallet.required = true;
+                fromWallet.required = false;
+                toWalletWithdraw.required = false;
+                moneyDescription.placeholder = 'VD: Nạp tiền mặt';
+                moneyDescription.value = 'Nạp tiền';
+                moneySubmitText.textContent = 'Nạp tiền';
+                moneyAction.value = 'deposit';
+                
+                // Clear withdraw fields
+                fromWallet.value = '';
+                toWalletWithdraw.value = '';
+            } else {
+                // Rút tiền (chuyển tiền)
+                depositSection.style.display = 'none';
+                withdrawSection.style.display = 'block';
+                depositWallet.required = false;
+                fromWallet.required = true;
+                toWalletWithdraw.required = true;
+                moneyDescription.placeholder = 'VD: Rút tiền về ví';
+                moneyDescription.value = 'Rút tiền';
+                moneySubmitText.textContent = 'Rút tiền';
+                moneyAction.value = 'transfer';
+                
+                // Clear deposit field
+                depositWallet.value = '';
+            }
+        }
+
+        // Check balance when transfer amount changes
+        document.addEventListener('DOMContentLoaded', function() {
+            const fromWallet = document.getElementById('fromWallet');
+            const moneyAmount = document.getElementById('moneyAmount');
+            const moneyWarning = document.getElementById('moneyWarning');
+
+            function checkBalance() {
+                const moneyAction = document.getElementById('moneyAction');
+                
+                if (moneyAction.value === 'transfer') {
+                    const selectedOption = fromWallet.options[fromWallet.selectedIndex];
+                    const balance = parseFloat(selectedOption.dataset.balance) || 0;
+                    const amount = parseFloat(moneyAmount.value) || 0;
+
+                    if (amount > balance) {
+                        moneyWarning.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Số dư không đủ!';
+                        moneyWarning.style.color = 'var(--danger)';
+                    } else if (amount > 0) {
+                        moneyWarning.innerHTML = '<i class="fas fa-check-circle"></i> Số dư đủ để rút';
+                        moneyWarning.style.color = 'var(--success)';
+                    } else {
+                        moneyWarning.innerHTML = '';
+                    }
+                } else {
+                    moneyWarning.innerHTML = '';
+                }
+            }
+
+            if (fromWallet && moneyAmount && moneyWarning) {
+                fromWallet.addEventListener('change', checkBalance);
+                moneyAmount.addEventListener('input', checkBalance);
+            }
+        });
 
         // Close modal on outside click
         document.getElementById('quickAddModal').addEventListener('click', function(e) {
@@ -1293,25 +1573,18 @@ $monthlyData = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             }
         });
 
+        document.getElementById('transferModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeTransferModal();
+            }
+        });
+
         // Close modal on ESC key
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 closeQuickAddModal();
+                closeTransferModal();
             }
-        });
-
-        // Quick Actions
-        document.querySelectorAll('.action-btn').forEach(btn => {
-            btn.addEventListener('click', function(e) {
-                e.preventDefault();
-                const action = this.querySelector('.action-label').textContent;
-                
-                if (action.includes('Nạp tiền') || action.includes('Chuyển tiền') || action.includes('Thanh toán')) {
-                    openQuickAddModal();
-                } else {
-                    alert('Tính năng ' + action + ' đang được phát triển!');
-                }
-            });
         });
 
         // Animation on load

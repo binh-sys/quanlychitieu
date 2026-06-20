@@ -165,7 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </form>
 
         <div class="footer">
-            <a href="../user/">← Về trang người dùng</a>
+            <a href="../finora/login.php/">← Về trang người dùng</a>
         </div>
     </div>
 </body>
